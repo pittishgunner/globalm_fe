@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Trip Sorter - Frontend</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link href="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" />
+<link href="//cdnjs.cloudflare.com/ajax/libs/select2/4.0.4/css/select2.min.css" rel="stylesheet" />
+<link href="//cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet" />
+
+<style type="text/css">
+    #content {width:240px;margin:0 auto;overflow:hidden;}
+    #title {font-size:24px; margin:12px 0;  }
+    #cwrap {width:480px;margin:0 0 12px 0; }
+    .select2 {width:100%;margin:0 0 8px 0; }
+    #filters, #results {display:inline-block;width:240px;vertical-align:top;}
+    .btn-group {width:100%;margin:0 0 8px 0; }
+    .btn-group .btn {width:50%; }
+    .btn-success {width:100%;border:none; } .btn-success:focus{outline: none;}
+    .alert {position:absolute;top:12px;right:12px;}
+    .segment, .totals {background:#eeeeee;padding:12px 8px;margin:0 0 12px;  } .totals {background:#dddddd;}
+    .s_pr {float:right;font-weight:bold;}
+    .s_tit {font-weight:bold;} .s_tit i {background:#fff;border-radius:8px;padding:2px 4px;font-size:18px; margin:0 4px; }
+    .s_desc {font-style:italic;} .s_type {font-weight:bold; }
+    .total {font-weight:bold;} .total span {font-weight:normal;display:inline-block;vertical-align:middle;margin:0 0 0 32px; }
+    .price, .disc_from {display:block;margin:0 0 2px; } .disc_from {text-decoration:line-through}
+</style>
+</head>
+<body>
+<div id="content">
+    <div id="title">TripSorter</div>
+    <div id="cwrap">
+        <div id="filters">
+            <form action="" method="post">
+                <select class="select2" id="f_from" name="filters[from]" data-placeholder="From"><option value=""></option></select>
+                <select class="select2" id="f_to" name="filters[to]" data-placeholder="To"><option value=""></option></select>
+                <input type="hidden" id="f_type" name="filters[type]" value="cheapest" />
+                <div class="btn-group" role="group" aria-label="Basic example">
+                    <button type="button" class="btn btn-primary btns_t" data-type="cheapest">Cheapest</button>
+                    <button type="button" class="btn btn-default btns_t" data-type="fastest">Fastest</button>
+                </div>
+                <button id="f_search" type="button" class="btn btn-success"><i class="fa fa-search"></i> Search</button>
+            </form>
+        </div><div id="results">
+            <div id="reswrap"></div>
+            <button id="f_reset" type="button" class="btn btn-success"><i class="fa fa-undo"></i> Reset</button>
+        </div>
+    </div>
+</div>
+    <div id="display"></div>
+<script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+<script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/bootstrap-switch/3.3.4/js/bootstrap-switch.min.js"></script>
+<script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/select2/4.0.4/js/select2.min.js"></script>
+<script type="text/javascript">
+var n={};
+var MAX_INT = 4294967295;
+var currency='';
+$(function() {
+    $(document).off("click",".btns_t").on("click",".btns_t",function(e){e.preventDefault();
+        $(".btns_t").removeClass("btn-primary").addClass("btn-default");
+        $(this).addClass("btn-primary");
+        $("#f_type").val($(this).attr("data-type"))
+    });
+    $(".select2").select2();
+    var deps=arrs=depps=[];
+    //preloading json because normally the available departure/arrival locations should be brought in paginated and by keywords via back-end api
+    var preload=$.ajax({url:"response.json"}).fail(function(){ addAlert("An error has occured while trying to preload available cities.")}).done(function(d){
+        if (d.deals!=undefined) {
+            currency=d.currency;
+            $.each(d.deals,function(i,e){
+                var from=e.departure, to=e.arrival, type=e.transport;
+                if (deps.indexOf(from)===-1) deps.push(from);
+                if (arrs.indexOf(to)===-1) arrs.push(to);
+                
+                if (n[from]===undefined) n[from]={};
+                if (n[from][to]===undefined) n[from][to]={};                
+                n[from][to][type]=e;
+                
+            });
+            deps.sort();arrs.sort();
+            var s2d_dep = $.map(deps, function (obj) { obj.id = obj; obj.text = obj; return obj; });
+            var s2d_arr = $.map(arrs, function (obj) { obj.id = obj; obj.text = obj; return obj; });
+            $("#f_from").select2({data:s2d_dep});
+            $("#f_to").select2({data:s2d_arr});
+        }
+    })
+    $(document).off("click","#f_search").on("click","#f_search",function(e){e.preventDefault();
+        var m="";
+        if ($("#f_from").val()=="") m +="Please fill in a departure location<br>";
+        if ($("#f_to").val()=="") m +="Please fill in an arrival location<br>";
+        if ($("#f_from").val()!=""&&$("#f_from").val()==$("#f_to").val()) m +="Departure cannot be the same as arrival<br>";
+        if (m=="") {
+            var results=getResults($("#f_from").val(),$("#f_to").val(),$("#f_type").val());
+            if (results.length==0) addAlert("We're sorry but we couldn't find any routes for your departure/destination combination.","warning");
+            else {
+                console.log(results);
+                $("#reswrap").html("").hide();
+                $("#cwrap").animate({'margin-left':'-240px'},400,function(){
+                    
+                });
+                var s='';
+                var tot_min=tot_cost=0;
+                $.each(results,function(i,e){
+                    var s_pr=formatPrice(e,currency);
+                    tot_cost+=s_pr.int;
+                    tot_min+=(parseInt(e.duration.h)*60)+parseInt(e.duration.m);
+                    s+='<div class="segment"><div class="s_pr">'+s_pr.string+'</div><div class="s_tit">'+e.departure+' <i class="fa fa-angle-right"></i> '+e.arrival+'</div><div class="s_desc"><span class="s_type">'+e.transport+'</span> '+e.reference+' for '+e.duration.h+'h'+e.duration.m+'</div></div>';
+                });
+                s+='<div class="totals"><div class="s_pr">'+formatPrice(tot_cost,currency).string+'</div><div class="total">Total <span>'+formatMins(tot_min)+'</span></div></div>';
+                $("#reswrap").html(s).slideDown(400);
+            }
+        } else addAlert(m);
+    });
+    $(document).off("click","#f_reset").on("click","#f_reset",function(e){e.preventDefault();
+        //$("#f_from, #f_to").val("").trigger("change");
+        $("#reswrap").slideUp(200);
+        $("#cwrap").animate({'margin-left':'0px'},200,function(){});
+    });    
+});
+function getResults(from, to, type) {
+    if (type===undefined) type="cheapest";
+    var graph = new Graph(n);
+    var sp = graph.findShortestPath(from, to);//get shortest node route
+    var segs=[];
+    if (sp!==null) {
+        $.each(sp,function(sp_i,sp_e){
+            if (sp[1]!==undefined) {
+                $.each(n,function(t_i,t_e){
+                   if (t_i===sp[0]&&t_e[sp[1]]!==undefined) {
+                       var cost=minutes=MAX_INT;
+                       var cost_k=minutes_k=0;
+                       for (var key in t_e[sp[1]]) {
+                           var emcal=t_e[sp[1]][key];
+                           var elcost=(emcal.cost-((emcal.discount/100)*emcal.cost));
+                           if (elcost<cost) {
+                               cost=elcost;cost_k=key;
+                           }
+                           var elminutes=(parseInt(emcal.duration.h)*60)+parseInt(emcal.duration.m);
+                           if (elminutes<minutes) {
+                               minutes=elminutes;minutes_k=key;
+                           }
+                       }
+                       if (type==="cheapest") {
+                           segs.push(t_e[sp[1]][cost_k]);
+                       } else {
+                           segs.push(t_e[sp[1]][minutes_k]);
+                       }
+                   }
+                });
+            }
+            sp.shift();
+        });
+    }
+    return segs;
+}
+function addAlert(message,type,remove) {
+    if (type===undefined) type="danger";
+    if (remove===undefined) remove=true;
+    
+    $('#content .alert').hide().remove();
+    $('#content').append(
+        '<div class="alert alertm alert-'+type+'">' +
+            '<button type="button" class="close" data-dismiss="alert">' +
+            '<i class="fa fa-times"></i></button>' + message + '</div>');
+    if (remove) $('#content').find(".alert").fadeIn("fast").delay(3000).fadeOut("fast",function(){$(this).remove();});
+    else $('#content').find(".alert").fadeIn("fast");
+
+}
+function formatPrice(el,cur){
+    if (cur===undefined) cur="EUR";
+    var currency_symbols = {'USD':'$','EUR':'€','CRC':'₡','GBP':'£'};
+    if (el.cost===undefined) {
+        var actualcost=cost=el;
+    } else {
+        var actualcost=(el.cost-((el.discount/100)*el.cost));
+        var cost=el.cost;
+    }
+    if (actualcost==cost) {
+        return {string:'<span class="price">'+actualcost+(currency_symbols[cur]!==undefined?currency_symbols[cur]:cur)+'</span>',int:actualcost};
+    } else {
+        return {string:'<span class="price">'+actualcost+(currency_symbols[cur]!==undefined?currency_symbols[cur]:cur)+'</span>'+
+               '<span class="disc_from">'+cost+(currency_symbols[cur]!==undefined?currency_symbols[cur]:cur)+'</span>',int:actualcost};
+    }
+}
+function formatMins(mins){
+    mins=parseInt(mins);
+    hours=Math.floor(mins/60);
+    minutes=(mins%60);
+    return str_pad_left(hours,'0',2)+'h'+str_pad_left(minutes,'0',2);
+}
+function str_pad_left(string,pad,length) {
+    return (new Array(length+1).join(pad)+string).slice(-length);
+}
+//using min ver of https://raw.githubusercontent.com/andrewhayward/dijkstra/master/graph.js to find shortest node path
+var Graph=function(t){var r=function(t){var r,n=[];for(r in t)Object.prototype.hasOwnProperty.call(t,r)&&n.push(r);return n},n=function(t,r){return parseFloat(t)-parseFloat(r)},e=function(e,o,a,u){u=u||1/0;var p,c={},i={0:[o]},s={},l=function(t,r){var n=""+t;i[n]||(i[n]=[]),i[n].push(r)};for(c[o]=0;i&&(p=r(i)).length;){p.sort(n);var h=p[0],f=i[h],g=f.shift(),y=parseFloat(h),v=e[g]||{};f.length||delete i[h];for(var m in v)if(Object.prototype.hasOwnProperty.call(v,m)){var b=v[m],j=b+y,O=c[m];(O===t||O>j)&&(c[m]=j,l(j,m),s[m]=g)}}return c[a]===t?null:s},o=function(t,r){for(var n=[],e=r;e;)n.push(e),predecessor=t[e],e=t[e];return n.reverse(),n},a=function(t,r){for(var n,a,u,p=r.shift(),c=[];r.length;){if(n=r.shift(),a=e(t,p,n),!a)return null;if(u=o(a,n),!r.length)return c.concat(u);c.push.apply(c,u.slice(0,-1)),p=n}},u=function(t,r){try{return Array.prototype.slice.call(t,r)}catch(n){for(var e=[],o=r||0,a=t.length;a>o;++o)e.push(t[o]);return e}},p=function(t){this.map=t};return p.prototype.findShortestPath=function(t,r){return"[object Array]"===Object.prototype.toString.call(t)?a(this.map,t):2===arguments.length?a(this.map,[t,r]):a(this.map,u(arguments))},p.findShortestPath=function(t,r,n){return"[object Array]"===Object.prototype.toString.call(r)?a(t,r):3===arguments.length?a(t,[r,n]):a(t,u(arguments,1))},p}();
+</script>
+</body>
+</html>
